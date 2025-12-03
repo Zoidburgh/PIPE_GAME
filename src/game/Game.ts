@@ -4,6 +4,7 @@ import { Grid } from '../board/Grid';
 import type { PlacedTile } from '../tiles/types';
 import { GENERATED_TILES, renderTileFromConfig, renderTileFlipped } from '../tiles/TileBuilder';
 import type { GeneratedTile } from '../tiles/TileBuilder';
+import { checkWinCondition, getTileConnectors, validateConnections } from './ConnectionValidator';
 
 export class Game {
   scene: THREE.Scene;
@@ -38,6 +39,9 @@ export class Game {
   // WASD camera control
   keys: { [key: string]: boolean } = {};
   cameraMode: 'orbit' | 'free' = 'orbit';
+
+  // Win state tracking
+  openConnectorMarkers: THREE.Mesh[] = [];
   
   constructor(container: HTMLElement) {
     this.scene = new THREE.Scene();
@@ -266,6 +270,7 @@ export class Game {
         tile: placedTile,
         meshKey
       });
+      this.checkWinState();
     }
   }
 
@@ -342,8 +347,8 @@ export class Game {
   private onKeyDown(event: KeyboardEvent) {
     const key = event.key.toLowerCase();
 
-    // Track WASD keys
-    if (['w', 'a', 's', 'd'].includes(key)) {
+    // Track WASD, Q/E, and arrow keys
+    if (['w', 'a', 's', 'd', 'q', 'e', 'arrowup', 'arrowdown', 'arrowleft', 'arrowright'].includes(key)) {
       this.keys[key] = true;
       return;
     }
@@ -365,12 +370,12 @@ export class Game {
         this.updatePreview();
         this.updateInfoDisplay();
         break;
-      case 'q':
+      case '1':
         this.placementHeight = Math.max(0, this.placementHeight - 1);
         this.updateHoverPosition();
         this.updateInfoDisplay();
         break;
-      case 'e':
+      case '2':
         this.placementHeight = Math.min(this.grid.gridSize.y - 1, this.placementHeight + 1);
         this.updateHoverPosition();
         this.updateInfoDisplay();
@@ -386,12 +391,15 @@ export class Game {
       case 'x':
         this.deleteAtHover();
         break;
+      case 'p':
+        this.debugBoardState();
+        break;
     }
   }
 
   private onKeyUp(event: KeyboardEvent) {
     const key = event.key.toLowerCase();
-    if (['w', 'a', 's', 'd'].includes(key)) {
+    if (['w', 'a', 's', 'd', 'q', 'e', 'arrowup', 'arrowdown', 'arrowleft', 'arrowright'].includes(key)) {
       this.keys[key] = false;
     }
   }
@@ -410,6 +418,7 @@ export class Game {
       this.createTileMesh(lastAction.tile);
     }
     this.updatePreview();
+    this.checkWinState();
   }
 
   private deleteAtHover() {
@@ -433,6 +442,7 @@ export class Game {
         meshKey: key
       });
       this.updatePreview();
+      this.checkWinState();
     }
   }
 
@@ -507,8 +517,114 @@ export class Game {
     }
   }
   
+  private checkWinState() {
+    // Clear old markers
+    for (const marker of this.openConnectorMarkers) {
+      this.scene.remove(marker);
+    }
+    this.openConnectorMarkers = [];
+
+    const result = checkWinCondition(
+      this.grid.flatTiles,
+      this.grid.edgeTilesX,
+      this.grid.edgeTilesZ
+    );
+
+    // Update status display
+    const statusEl = document.getElementById('win-status');
+    if (statusEl) {
+      statusEl.textContent = result.message;
+      statusEl.classList.remove('won', 'open');
+      if (result.won) {
+        statusEl.classList.add('won');
+      } else if (result.openConnectors.length > 0) {
+        statusEl.classList.add('open');
+      }
+    }
+
+    // Show markers at open connectors
+    for (const conn of result.openConnectors) {
+      const geometry = new THREE.SphereGeometry(0.05, 8, 8);
+      const material = new THREE.MeshStandardMaterial({
+        color: 0xff4444,
+        emissive: 0x441111,
+        emissiveIntensity: 0.5
+      });
+      const marker = new THREE.Mesh(geometry, material);
+      marker.position.set(
+        (conn.wx - this.grid.gridSize.x / 2) * this.grid.cellSize,
+        conn.wy * this.grid.cellSize + 0.1,
+        (conn.wz - this.grid.gridSize.z / 2) * this.grid.cellSize
+      );
+      this.scene.add(marker);
+      this.openConnectorMarkers.push(marker);
+    }
+
+    if (result.won) {
+      console.log('YOU WIN!');
+    }
+  }
+
+  private debugBoardState() {
+    const allTiles = [
+      ...this.grid.flatTiles.values(),
+      ...this.grid.edgeTilesX.values(),
+      ...this.grid.edgeTilesZ.values()
+    ];
+
+    const output: string[] = [];
+    output.push('=== BOARD STATE DEBUG ===');
+    output.push(`Total tiles: ${allTiles.length}`);
+    output.push('');
+
+    // List all tiles with their properties
+    output.push('--- PLACED TILES ---');
+    for (const tile of allTiles) {
+      output.push(`Tile: ${tile.definition.name}`);
+      output.push(`  Position: (${tile.position.x}, ${tile.position.y}, ${tile.position.z})`);
+      output.push(`  Orientation: ${tile.orientation}`);
+      output.push(`  Rotation: ${tile.rotation}°`);
+      output.push(`  Flipped: ${tile.flipped}`);
+      output.push(`  Config: T=${tile.definition.config?.top || 'null'} R=${tile.definition.config?.right || 'null'} B=${tile.definition.config?.bottom || 'null'} L=${tile.definition.config?.left || 'null'}`);
+
+      // Get connectors for this tile
+      const connectors = getTileConnectors(tile);
+      output.push(`  Connectors (${connectors.length}):`);
+      for (const conn of connectors) {
+        output.push(`    Edge ${conn.edge} (${conn.pos}): world pos (${conn.wx.toFixed(3)}, ${conn.wy.toFixed(3)}, ${conn.wz.toFixed(3)})`);
+      }
+      output.push('');
+    }
+
+    // Validation results
+    output.push('--- CONNECTION VALIDATION ---');
+    const validation = validateConnections(allTiles);
+    output.push(`Valid: ${validation.valid}`);
+    output.push(`Connected pairs: ${validation.connectedPairs.length}`);
+    for (const [a, b] of validation.connectedPairs) {
+      output.push(`  Pair: Tile at (${a.tile.position.x},${a.tile.position.y},${a.tile.position.z}) ${a.edge}-${a.pos} <-> Tile at (${b.tile.position.x},${b.tile.position.y},${b.tile.position.z}) ${b.edge}-${b.pos}`);
+      output.push(`    World pos: (${a.wx.toFixed(3)}, ${a.wy.toFixed(3)}, ${a.wz.toFixed(3)})`);
+    }
+
+    output.push(`Open connectors: ${validation.openConnectors.length}`);
+    for (const conn of validation.openConnectors) {
+      output.push(`  Tile at (${conn.tile.position.x},${conn.tile.position.y},${conn.tile.position.z}) ${conn.tile.orientation} ${conn.edge}-${conn.pos}: world (${conn.wx.toFixed(3)}, ${conn.wy.toFixed(3)}, ${conn.wz.toFixed(3)})`);
+    }
+
+    const text = output.join('\n');
+    console.log(text);
+
+    // Copy to clipboard
+    navigator.clipboard.writeText(text).then(() => {
+      console.log('Debug info copied to clipboard!');
+    }).catch(err => {
+      console.error('Failed to copy to clipboard:', err);
+    });
+  }
+
   private updateCamera() {
-    const speed = 0.3;
+    const moveSpeed = 0.3;
+    const rotateSpeed = 0.02;
 
     // Get camera's forward and right vectors (on XZ plane)
     const forward = new THREE.Vector3();
@@ -519,17 +635,46 @@ export class Game {
     const right = new THREE.Vector3();
     right.crossVectors(forward, new THREE.Vector3(0, 1, 0)).normalize();
 
-    // Move camera and target together
+    // WASD: Move camera and target together
     const movement = new THREE.Vector3();
 
-    if (this.keys['w']) movement.add(forward.clone().multiplyScalar(speed));
-    if (this.keys['s']) movement.add(forward.clone().multiplyScalar(-speed));
-    if (this.keys['a']) movement.add(right.clone().multiplyScalar(-speed));
-    if (this.keys['d']) movement.add(right.clone().multiplyScalar(speed));
+    if (this.keys['w']) movement.add(forward.clone().multiplyScalar(moveSpeed));
+    if (this.keys['s']) movement.add(forward.clone().multiplyScalar(-moveSpeed));
+    if (this.keys['a']) movement.add(right.clone().multiplyScalar(-moveSpeed));
+    if (this.keys['d']) movement.add(right.clone().multiplyScalar(moveSpeed));
+
+    // Q/E: Move camera up/down
+    if (this.keys['q']) movement.y -= moveSpeed;
+    if (this.keys['e']) movement.y += moveSpeed;
 
     if (movement.length() > 0) {
       this.camera.position.add(movement);
       this.controls.target.add(movement);
+    }
+
+    // Arrow keys: Rotate view (orbit target around camera position)
+    const toTarget = this.controls.target.clone().sub(this.camera.position);
+    const distance = toTarget.length();
+
+    // Left/Right arrows: rotate horizontally
+    if (this.keys['arrowleft'] || this.keys['arrowright']) {
+      const angle = this.keys['arrowleft'] ? rotateSpeed : -rotateSpeed;
+      toTarget.applyAxisAngle(new THREE.Vector3(0, 1, 0), angle);
+      this.controls.target.copy(this.camera.position).add(toTarget);
+    }
+
+    // Up/Down arrows: rotate vertically (pitch)
+    if (this.keys['arrowup'] || this.keys['arrowdown']) {
+      const angle = this.keys['arrowup'] ? rotateSpeed : -rotateSpeed;
+      // Rotate around the right vector
+      const currentPitch = Math.asin(toTarget.y / distance);
+      const newPitch = Math.max(-Math.PI / 2.5, Math.min(Math.PI / 2.5, currentPitch + angle));
+
+      // Only apply if within bounds
+      if (Math.abs(newPitch - currentPitch) > 0.001) {
+        toTarget.applyAxisAngle(right, angle);
+        this.controls.target.copy(this.camera.position).add(toTarget);
+      }
     }
   }
 
