@@ -182,16 +182,20 @@ export class Game {
     const tileSize = this.grid.cellSize * 0.95;
     const geometry = new THREE.PlaneGeometry(tileSize, tileSize);
 
-    // Preview material - flashing opacity, no color tint
+    // Preview material - flash red if invalid placement
     const material = new THREE.MeshStandardMaterial({
       map: topTexture,
       transparent: true,
       alphaTest: 0.1,
-      opacity: canPlace ? 0.7 : 0.3,
+      opacity: 0.7,
       side: THREE.DoubleSide,
+      color: canPlace ? 0xffffff : 0xff4444,
+      emissive: canPlace ? 0x000000 : 0x440000,
     });
 
     this.previewMesh = new THREE.Mesh(geometry, material);
+    // Store canPlace state on mesh for animation
+    (this.previewMesh as any).canPlace = canPlace;
     this.previewMesh.rotation.x = -Math.PI / 2; // Rotate to lie flat
 
     const worldPos = this.grid.gridToWorld(
@@ -536,10 +540,21 @@ export class Game {
 
     // Flash preview mesh
     if (this.previewMesh) {
-      this.previewTime += 0.03;
-      const flash = 0.4 + Math.sin(this.previewTime * 2) * 0.3; // oscillates between 0.1 and 0.7
+      this.previewTime += 0.05;
       const material = this.previewMesh.material as THREE.MeshStandardMaterial;
-      material.opacity = flash;
+      const canPlace = (this.previewMesh as any).canPlace;
+
+      if (canPlace) {
+        // Valid: gentle opacity flash
+        const flash = 0.5 + Math.sin(this.previewTime * 2) * 0.3;
+        material.opacity = flash;
+      } else {
+        // Invalid: flash red more aggressively
+        const flash = 0.5 + Math.sin(this.previewTime * 4) * 0.4;
+        material.opacity = flash;
+        const redIntensity = 0.5 + Math.sin(this.previewTime * 4) * 0.5;
+        material.emissive.setRGB(redIntensity * 0.3, 0, 0);
+      }
     }
 
     this.renderer.render(this.scene, this.camera);

@@ -109,14 +109,44 @@ export class Grid {
     // Ground level always valid
     if (y === 0) return true;
 
-    // For flat tiles, need flat tile support below
+    // For flat tiles above ground, need at least 2 vertical tile supports
     if (orientation === 'flat') {
+      return this.hasVerticalSupport(x, y, z);
+    }
+
+    // Vertical tiles need a flat tile below them at y-1 level
+    if (orientation === 'vertical-x' || orientation === 'vertical-z') {
       const belowKey = this.getCellKey(x, y - 1, z);
       return this.flatTiles.has(belowKey);
     }
 
-    // Vertical tiles can be placed at any height
     return true;
+  }
+
+  // Check if a flat tile at (x, y, z) has at least 2 vertical supports
+  // Supports can be on corners or opposite edges from the layer below
+  private hasVerticalSupport(x: number, y: number, z: number): boolean {
+    let supportCount = 0;
+
+    // Check vertical-x tiles on left edge (x-1) and right edge (x) at y-1 level
+    // Left edge: vertical-x at (x-1, y-1, z)
+    const leftKey = this.getCellKey(x - 1, y - 1, z);
+    if (this.edgeTilesX.has(leftKey)) supportCount++;
+
+    // Right edge: vertical-x at (x, y-1, z)
+    const rightKey = this.getCellKey(x, y - 1, z);
+    if (this.edgeTilesX.has(rightKey)) supportCount++;
+
+    // Check vertical-z tiles on front edge (z-1) and back edge (z) at y-1 level
+    // Front edge: vertical-z at (x, y-1, z-1)
+    const frontKey = this.getCellKey(x, y - 1, z - 1);
+    if (this.edgeTilesZ.has(frontKey)) supportCount++;
+
+    // Back edge: vertical-z at (x, y-1, z)
+    const backKey = this.getCellKey(x, y - 1, z);
+    if (this.edgeTilesZ.has(backKey)) supportCount++;
+
+    return supportCount >= 2;
   }
 
   // Place a tile

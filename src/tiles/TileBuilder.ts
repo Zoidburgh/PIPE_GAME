@@ -123,7 +123,36 @@ export function renderTileFromConfig(config: TileConfig, size = 128, transparent
   ctx.lineJoin = 'round';
 
   if (connectors.length === 1) {
-    // Just a dot, no lines
+    // Single connector - draw a spiral to the center
+    const conn = connectors[0];
+    const centerX = size / 2;
+    const centerY = size / 2;
+
+    ctx.beginPath();
+    ctx.moveTo(conn.x, conn.y);
+
+    // Draw spiral from connector to center
+    const turns = 2.5;
+    const steps = 40;
+    const startDist = Math.sqrt(Math.pow(conn.x - centerX, 2) + Math.pow(conn.y - centerY, 2));
+    const startAngle = Math.atan2(conn.y - centerY, conn.x - centerX);
+
+    for (let i = 1; i <= steps; i++) {
+      const t = i / steps;
+      const dist = startDist * (1 - t);
+      const angle = startAngle + t * turns * Math.PI * 2;
+      const x = centerX + Math.cos(angle) * dist;
+      const y = centerY + Math.sin(angle) * dist;
+      ctx.lineTo(x, y);
+    }
+
+    ctx.stroke();
+
+    // Draw small dot at center end of spiral
+    ctx.fillStyle = pipeColor;
+    ctx.beginPath();
+    ctx.arc(centerX, centerY, 4, 0, Math.PI * 2);
+    ctx.fill();
   } else if (connectors.length === 2) {
     // Simple line between two connectors
     ctx.beginPath();
