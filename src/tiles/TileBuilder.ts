@@ -20,39 +20,40 @@ export interface GeneratedTile {
   config: TileConfig;
 }
 
-// Get pixel position for a connector on an edge
+// Get pixel position and angle for a connector on an edge
 function getConnectorPosition(
   edge: 'top' | 'right' | 'bottom' | 'left',
   pos: ConnectorPos,
   size: number,
-  margin: number
-): { x: number; y: number } | null {
+  _margin: number
+): { x: number; y: number; angle: number } | null {
   if (pos === null) return null;
 
   // Corner positions are 18% from center (closer to middle than actual corners)
   const cornerOffset = size * 0.18;
   const mid = size / 2;
 
+  // Angle is the direction the half-circle faces (inward)
   switch (edge) {
     case 'top':
-      if (pos === 'left') return { x: mid - cornerOffset, y: margin };
-      if (pos === 'middle') return { x: mid, y: margin };
-      if (pos === 'right') return { x: mid + cornerOffset, y: margin };
+      if (pos === 'left') return { x: mid - cornerOffset, y: 0, angle: Math.PI / 2 };
+      if (pos === 'middle') return { x: mid, y: 0, angle: Math.PI / 2 };
+      if (pos === 'right') return { x: mid + cornerOffset, y: 0, angle: Math.PI / 2 };
       break;
     case 'right':
-      if (pos === 'left') return { x: size - margin, y: mid - cornerOffset };
-      if (pos === 'middle') return { x: size - margin, y: mid };
-      if (pos === 'right') return { x: size - margin, y: mid + cornerOffset };
+      if (pos === 'left') return { x: size, y: mid - cornerOffset, angle: Math.PI };
+      if (pos === 'middle') return { x: size, y: mid, angle: Math.PI };
+      if (pos === 'right') return { x: size, y: mid + cornerOffset, angle: Math.PI };
       break;
     case 'bottom':
-      if (pos === 'left') return { x: mid + cornerOffset, y: size - margin };
-      if (pos === 'middle') return { x: mid, y: size - margin };
-      if (pos === 'right') return { x: mid - cornerOffset, y: size - margin };
+      if (pos === 'left') return { x: mid + cornerOffset, y: size, angle: -Math.PI / 2 };
+      if (pos === 'middle') return { x: mid, y: size, angle: -Math.PI / 2 };
+      if (pos === 'right') return { x: mid - cornerOffset, y: size, angle: -Math.PI / 2 };
       break;
     case 'left':
-      if (pos === 'left') return { x: margin, y: mid + cornerOffset };
-      if (pos === 'middle') return { x: margin, y: mid };
-      if (pos === 'right') return { x: margin, y: mid - cornerOffset };
+      if (pos === 'left') return { x: 0, y: mid + cornerOffset, angle: 0 };
+      if (pos === 'middle') return { x: 0, y: mid, angle: 0 };
+      if (pos === 'right') return { x: 0, y: mid - cornerOffset, angle: 0 };
       break;
   }
   return null;
@@ -83,7 +84,7 @@ export function renderTileFromConfig(config: TileConfig, size = 128, transparent
   const ctx = canvas.getContext('2d')!;
 
   const margin = 8;
-  const dotRadius = 7;
+  const dotRadius = 14;
   const lineWidth = 8;
   const pipeColor = '#33dd77';
   const dotColor = '#ffff44';  // bright yellow for corner dots
@@ -104,8 +105,8 @@ export function renderTileFromConfig(config: TileConfig, size = 128, transparent
     ctx.strokeRect(1, 1, size - 2, size - 2);
   }
 
-  // Gather all connector positions with their type (middle or corner)
-  const connectors: { x: number; y: number; isMiddle: boolean }[] = [];
+  // Gather all connector positions with their type (middle or corner) and angle
+  const connectors: { x: number; y: number; angle: number; isMiddle: boolean }[] = [];
   const edges: Array<'top' | 'right' | 'bottom' | 'left'> = ['top', 'right', 'bottom', 'left'];
 
   for (const edge of edges) {
@@ -142,10 +143,14 @@ export function renderTileFromConfig(config: TileConfig, size = 128, transparent
     }
   }
 
-  // Draw connector dots - different colors for middle vs corner
+  // Draw connector half-circles - flush with edge, different colors for middle vs corner
+  const middleDotRadius = dotRadius * 1.7;  // 70% bigger for middle connectors
   for (const conn of connectors) {
+    const radius = conn.isMiddle ? middleDotRadius : dotRadius;
     ctx.beginPath();
-    ctx.arc(conn.x, conn.y, dotRadius, 0, Math.PI * 2);
+    // Half circle: angle points inward, so we draw from angle-PI/2 to angle+PI/2
+    ctx.arc(conn.x, conn.y, radius, conn.angle - Math.PI / 2, conn.angle + Math.PI / 2);
+    ctx.closePath();
     if (conn.isMiddle) {
       ctx.fillStyle = middleDotColor;  // magenta for middle
       ctx.fill();
@@ -162,12 +167,13 @@ export function renderTileFromConfig(config: TileConfig, size = 128, transparent
   return canvas;
 }
 
-// Get canonical form of a tile config (smallest rotation)
+// Get canonical form of a tile config (smallest of all rotations and mirror+rotations)
 function getCanonicalConfig(config: TileConfig): string {
   const edges = [config.top, config.right, config.bottom, config.left];
 
+  const variants: string[] = [];
+
   // Generate all 4 rotations
-  const rotations: string[] = [];
   for (let r = 0; r < 4; r++) {
     const rotated = [
       edges[(0 + r) % 4],
@@ -175,12 +181,39 @@ function getCanonicalConfig(config: TileConfig): string {
       edges[(2 + r) % 4],
       edges[(3 + r) % 4]
     ];
-    rotations.push(rotated.map(p => p || 'x').join('-'));
+    variants.push(rotated.map(p => p || 'x').join('-'));
   }
 
-  // Return the lexicographically smallest rotation as canonical form
-  rotations.sort();
-  return rotations[0];
+  // Generate mirrored version (flip horizontally - swap left/right edges and flip left/right positions)
+  // When mirrored: top stays top but left<->right, bottom stays bottom but left<->right
+  // left edge becomes right edge, right edge becomes left edge
+  const mirrorEdge = (pos: ConnectorPos): ConnectorPos => {
+    if (pos === 'left') return 'right';
+    if (pos === 'right') return 'left';
+    return pos;
+  };
+
+  const mirrored = [
+    mirrorEdge(config.top),      // top: left/right swap
+    mirrorEdge(config.left),     // right edge was left edge
+    mirrorEdge(config.bottom),   // bottom: left/right swap
+    mirrorEdge(config.right)     // left edge was right edge
+  ];
+
+  // Generate all 4 rotations of mirrored version
+  for (let r = 0; r < 4; r++) {
+    const rotated = [
+      mirrored[(0 + r) % 4],
+      mirrored[(1 + r) % 4],
+      mirrored[(2 + r) % 4],
+      mirrored[(3 + r) % 4]
+    ];
+    variants.push(rotated.map(p => p || 'x').join('-'));
+  }
+
+  // Return the lexicographically smallest as canonical form
+  variants.sort();
+  return variants[0];
 }
 
 // Generate all possible tile combinations (without rotational duplicates)

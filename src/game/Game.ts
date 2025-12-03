@@ -19,6 +19,7 @@ export class Game {
   currentOrientation: 'flat' | 'vertical-x' | 'vertical-z' = 'flat';
   
   previewMesh: THREE.Mesh | null = null;
+  previewTime = 0;
   hoverPosition: { x: number; y: number; z: number } | null = null;
   
   tileTextures: Map<string, THREE.CanvasTexture> = new Map();
@@ -170,49 +171,28 @@ export class Game {
       this.currentOrientation
     );
 
-    const texture = this.tileTextures.get(this.selectedTileType.id);
-    const flippedTexture = this.tileTextures.get(this.selectedTileType.id + '_flipped');
-    if (!texture || !flippedTexture) return;
+    // If flipped, swap which texture goes on top vs bottom
+    const topTexId = this.currentFlipped ? this.selectedTileType.id + '_flipped' : this.selectedTileType.id;
+    const bottomTexId = this.currentFlipped ? this.selectedTileType.id : this.selectedTileType.id + '_flipped';
+    const topTexture = this.tileTextures.get(topTexId);
+    const bottomTexture = this.tileTextures.get(bottomTexId);
+    if (!topTexture || !bottomTexture) return;
 
-    // Tile fills one cell (with small gap)
+    // Tile fills one cell (with small gap) - flat plane
     const tileSize = this.grid.cellSize * 0.95;
-    const tileThickness = 0.15;
-    const geometry = new THREE.BoxGeometry(tileSize, tileThickness, tileSize);
+    const geometry = new THREE.PlaneGeometry(tileSize, tileSize);
 
-    // Preview top face with red tint
-    const topMaterial = new THREE.MeshStandardMaterial({
-      map: texture,
+    // Preview material - flashing opacity, no color tint
+    const material = new THREE.MeshStandardMaterial({
+      map: topTexture,
       transparent: true,
       alphaTest: 0.1,
-      opacity: canPlace ? 0.9 : 0.5,
-      color: canPlace ? 0xff8888 : 0xff4444,
-      emissive: canPlace ? 0x441111 : 0x220000,
-      emissiveIntensity: 0.5,
+      opacity: canPlace ? 0.7 : 0.3,
+      side: THREE.DoubleSide,
     });
 
-    // Preview bottom face (mirrored) with red tint
-    const bottomMaterial = new THREE.MeshStandardMaterial({
-      map: flippedTexture,
-      transparent: true,
-      alphaTest: 0.1,
-      opacity: canPlace ? 0.9 : 0.5,
-      color: canPlace ? 0xff8888 : 0xff4444,
-      emissive: canPlace ? 0x441111 : 0x220000,
-      emissiveIntensity: 0.5,
-    });
-
-    const sideMaterial = new THREE.MeshStandardMaterial({
-      transparent: true,
-      opacity: 0,
-    });
-
-    const materials = [
-      sideMaterial, sideMaterial,
-      topMaterial, bottomMaterial,
-      sideMaterial, sideMaterial,
-    ];
-
-    this.previewMesh = new THREE.Mesh(geometry, materials);
+    this.previewMesh = new THREE.Mesh(geometry, material);
+    this.previewMesh.rotation.x = -Math.PI / 2; // Rotate to lie flat
 
     const worldPos = this.grid.gridToWorld(
       this.hoverPosition.x,
@@ -230,26 +210,29 @@ export class Game {
   private applyTileTransform(mesh: THREE.Mesh, orientation: string, rotation: number) {
     const rotRad = (rotation * Math.PI) / 180;
     const halfCell = this.grid.cellSize / 2;
-    const tileThickness = 0.15;
 
     switch (orientation) {
       case 'flat':
-        mesh.rotation.set(0, rotRad, 0);
-        mesh.position.y = this.placementHeight * this.grid.cellSize + tileThickness / 2;
+        // Plane lies flat, rotate around Y (which becomes Z after the X rotation)
+        mesh.rotation.set(-Math.PI / 2, 0, rotRad);
+        mesh.position.y = this.placementHeight * this.grid.cellSize + 0.01;
         break;
       case 'vertical-x':
-        // Standing on the +X edge, rotating around Z axis (the tile's local Y when tilted)
-        mesh.rotation.order = 'ZYX';
-        mesh.rotation.set(0, 0, Math.PI / 2);
-        mesh.rotateY(rotRad);  // rotate on tile's local axis
+        // Standing on the +X edge, facing into the cell
+        // First make it vertical (rotate around Z), then spin it (rotate around its local normal)
+        mesh.rotation.order = 'YXZ';
+        mesh.rotation.set(0, 0, 0);
+        mesh.rotateY(Math.PI / 2);  // face into cell
+        mesh.rotateZ(rotRad);       // spin on plane
         mesh.position.x += halfCell;
         mesh.position.y = this.placementHeight * this.grid.cellSize + halfCell;
         break;
       case 'vertical-z':
-        // Standing on the +Z edge, rotating around X axis (the tile's local Y when tilted)
-        mesh.rotation.order = 'XYZ';
-        mesh.rotation.set(Math.PI / 2, 0, 0);
-        mesh.rotateY(rotRad);  // rotate on tile's local axis
+        // Standing on the +Z edge, facing into the cell
+        mesh.rotation.order = 'YXZ';
+        mesh.rotation.set(0, 0, 0);
+        mesh.rotateX(-Math.PI / 2); // stand up
+        mesh.rotateZ(rotRad);       // spin on plane
         mesh.position.z += halfCell;
         mesh.position.y = this.placementHeight * this.grid.cellSize + halfCell;
         break;
@@ -283,44 +266,28 @@ export class Game {
   }
 
   private createTileMesh(tile: PlacedTile): string {
-    const texture = this.tileTextures.get(tile.definition.id);
-    const flippedTexture = this.tileTextures.get(tile.definition.id + '_flipped');
+    // If flipped, swap which texture goes on top vs bottom
+    const topTexId = tile.flipped ? tile.definition.id + '_flipped' : tile.definition.id;
+    const bottomTexId = tile.flipped ? tile.definition.id : tile.definition.id + '_flipped';
+    const topTexture = this.tileTextures.get(topTexId);
+    const bottomTexture = this.tileTextures.get(bottomTexId);
     const key = tile.position.x + ',' + tile.position.y + ',' + tile.position.z + ',' + tile.orientation;
-    if (!texture || !flippedTexture) return key;
+    if (!topTexture || !bottomTexture) return key;
 
-    // Tile fills one cell (with small gap)
+    // Tile fills one cell (with small gap) - flat plane
     const tileSize = this.grid.cellSize * 0.95;
-    const tileThickness = 0.15;
-    const geometry = new THREE.BoxGeometry(tileSize, tileThickness, tileSize);
+    const geometry = new THREE.PlaneGeometry(tileSize, tileSize);
 
-    // Top face material
-    const topMaterial = new THREE.MeshStandardMaterial({
-      map: texture,
+    // Double-sided material
+    const material = new THREE.MeshStandardMaterial({
+      map: topTexture,
       transparent: true,
       alphaTest: 0.1,
+      side: THREE.DoubleSide,
     });
 
-    // Bottom face material (mirrored)
-    const bottomMaterial = new THREE.MeshStandardMaterial({
-      map: flippedTexture,
-      transparent: true,
-      alphaTest: 0.1,
-    });
-
-    // Transparent/invisible sides
-    const sideMaterial = new THREE.MeshStandardMaterial({
-      transparent: true,
-      opacity: 0,
-    });
-
-    // Box faces: +X, -X, +Y (top), -Y (bottom), +Z, -Z
-    const materials = [
-      sideMaterial, sideMaterial,  // left/right sides (invisible)
-      topMaterial, bottomMaterial,  // top and bottom (pipe textures)
-      sideMaterial, sideMaterial,  // front/back sides (invisible)
-    ];
-
-    const mesh = new THREE.Mesh(geometry, materials);
+    const mesh = new THREE.Mesh(geometry, material);
+    mesh.rotation.x = -Math.PI / 2; // Rotate to lie flat
 
     const worldPos = this.grid.gridToWorld(tile.position.x, tile.position.y, tile.position.z);
     mesh.position.copy(worldPos);
@@ -339,26 +306,27 @@ export class Game {
   private applyTileMeshTransform(mesh: THREE.Mesh, tile: PlacedTile) {
     const rotRad = (tile.rotation * Math.PI) / 180;
     const halfCell = this.grid.cellSize / 2;
-    const tileThickness = 0.15;
 
     switch (tile.orientation) {
       case 'flat':
-        mesh.rotation.set(0, rotRad, 0);
-        mesh.position.y = tile.position.y * this.grid.cellSize + tileThickness / 2;
+        mesh.rotation.set(-Math.PI / 2, 0, rotRad);
+        mesh.position.y = tile.position.y * this.grid.cellSize + 0.01;
         break;
       case 'vertical-x':
-        // Standing on the +X edge, rotating on tile's local axis
-        mesh.rotation.order = 'ZYX';
-        mesh.rotation.set(0, 0, Math.PI / 2);
-        mesh.rotateY(rotRad);
+        // Standing on the +X edge, facing into the cell
+        mesh.rotation.order = 'YXZ';
+        mesh.rotation.set(0, 0, 0);
+        mesh.rotateY(Math.PI / 2);
+        mesh.rotateZ(rotRad);
         mesh.position.x += halfCell;
         mesh.position.y = tile.position.y * this.grid.cellSize + halfCell;
         break;
       case 'vertical-z':
-        // Standing on the +Z edge, rotating on tile's local axis
-        mesh.rotation.order = 'XYZ';
-        mesh.rotation.set(Math.PI / 2, 0, 0);
-        mesh.rotateY(rotRad);
+        // Standing on the +Z edge, facing into the cell
+        mesh.rotation.order = 'YXZ';
+        mesh.rotation.set(0, 0, 0);
+        mesh.rotateX(-Math.PI / 2);
+        mesh.rotateZ(rotRad);
         mesh.position.z += halfCell;
         mesh.position.y = tile.position.y * this.grid.cellSize + halfCell;
         break;
@@ -563,6 +531,15 @@ export class Game {
     requestAnimationFrame(this.animate);
     this.updateCamera();
     this.controls.update();
+
+    // Flash preview mesh
+    if (this.previewMesh) {
+      this.previewTime += 0.03;
+      const flash = 0.4 + Math.sin(this.previewTime * 2) * 0.3; // oscillates between 0.1 and 0.7
+      const material = this.previewMesh.material as THREE.MeshStandardMaterial;
+      material.opacity = flash;
+    }
+
     this.renderer.render(this.scene, this.camera);
   };
 }
