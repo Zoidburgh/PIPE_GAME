@@ -211,28 +211,28 @@ export class Game {
     const rotRad = (rotation * Math.PI) / 180;
     const halfCell = this.grid.cellSize / 2;
 
+    // PlaneGeometry faces +Z by default
+    // Reset rotation order to default
+    mesh.rotation.order = 'XYZ';
+
     switch (orientation) {
       case 'flat':
-        // Plane lies flat, rotate around Y (which becomes Z after the X rotation)
-        mesh.rotation.set(-Math.PI / 2, 0, rotRad);
+        // Lie flat on XZ plane, then rotate around Y axis
+        mesh.rotation.set(-Math.PI / 2, 0, 0);
+        mesh.rotateOnWorldAxis(new THREE.Vector3(0, 1, 0), rotRad);
         mesh.position.y = this.placementHeight * this.grid.cellSize + 0.01;
         break;
       case 'vertical-x':
-        // Standing on the +X edge, facing into the cell
-        // First make it vertical (rotate around Z), then spin it (rotate around its local normal)
-        mesh.rotation.order = 'YXZ';
-        mesh.rotation.set(0, 0, 0);
-        mesh.rotateY(Math.PI / 2);  // face into cell
-        mesh.rotateZ(rotRad);       // spin on plane
+        // Standing vertical on the +X edge (plane faces -X into cell)
+        mesh.rotation.set(0, -Math.PI / 2, 0);
+        mesh.rotateOnAxis(new THREE.Vector3(0, 0, 1), rotRad);
         mesh.position.x += halfCell;
         mesh.position.y = this.placementHeight * this.grid.cellSize + halfCell;
         break;
       case 'vertical-z':
-        // Standing on the +Z edge, facing into the cell
-        mesh.rotation.order = 'YXZ';
-        mesh.rotation.set(0, 0, 0);
-        mesh.rotateX(-Math.PI / 2); // stand up
-        mesh.rotateZ(rotRad);       // spin on plane
+        // Standing vertical on the +Z edge (plane faces -Z into cell)
+        mesh.rotation.set(0, Math.PI, 0);
+        mesh.rotateOnAxis(new THREE.Vector3(0, 0, 1), rotRad);
         mesh.position.z += halfCell;
         mesh.position.y = this.placementHeight * this.grid.cellSize + halfCell;
         break;
@@ -307,26 +307,28 @@ export class Game {
     const rotRad = (tile.rotation * Math.PI) / 180;
     const halfCell = this.grid.cellSize / 2;
 
+    // PlaneGeometry faces +Z by default
+    // Reset rotation order to default
+    mesh.rotation.order = 'XYZ';
+
     switch (tile.orientation) {
       case 'flat':
-        mesh.rotation.set(-Math.PI / 2, 0, rotRad);
+        // Lie flat on XZ plane, then rotate around Y axis
+        mesh.rotation.set(-Math.PI / 2, 0, 0);
+        mesh.rotateOnWorldAxis(new THREE.Vector3(0, 1, 0), rotRad);
         mesh.position.y = tile.position.y * this.grid.cellSize + 0.01;
         break;
       case 'vertical-x':
-        // Standing on the +X edge, facing into the cell
-        mesh.rotation.order = 'YXZ';
-        mesh.rotation.set(0, 0, 0);
-        mesh.rotateY(Math.PI / 2);
-        mesh.rotateZ(rotRad);
+        // Standing vertical on the +X edge (plane faces -X into cell)
+        mesh.rotation.set(0, -Math.PI / 2, 0);
+        mesh.rotateOnAxis(new THREE.Vector3(0, 0, 1), rotRad);
         mesh.position.x += halfCell;
         mesh.position.y = tile.position.y * this.grid.cellSize + halfCell;
         break;
       case 'vertical-z':
-        // Standing on the +Z edge, facing into the cell
-        mesh.rotation.order = 'YXZ';
-        mesh.rotation.set(0, 0, 0);
-        mesh.rotateX(-Math.PI / 2);
-        mesh.rotateZ(rotRad);
+        // Standing vertical on the +Z edge (plane faces -Z into cell)
+        mesh.rotation.set(0, Math.PI, 0);
+        mesh.rotateOnAxis(new THREE.Vector3(0, 0, 1), rotRad);
         mesh.position.z += halfCell;
         mesh.position.y = tile.position.y * this.grid.cellSize + halfCell;
         break;
