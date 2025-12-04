@@ -5,6 +5,8 @@ import type { PlacedTile } from '../tiles/types';
 import { GENERATED_TILES, renderTileFromConfig, renderTileFlipped } from '../tiles/TileBuilder';
 import type { GeneratedTile } from '../tiles/TileBuilder';
 import { checkWinCondition, getTileConnectors, validateConnections } from './ConnectionValidator';
+import { generatePuzzleWithSolution } from '../puzzle';
+import type { Puzzle, Solution } from '../puzzle/types';
 
 export class Game {
   scene: THREE.Scene;
@@ -12,17 +14,17 @@ export class Game {
   renderer: THREE.WebGLRenderer;
   controls: OrbitControls;
   grid: Grid;
-  
+
   selectedTileType: GeneratedTile | null = null;
   currentRotation = 0;
   currentFlipped = false;
   placementHeight = 0;
   currentOrientation: 'flat' | 'vertical-x' | 'vertical-z' = 'flat';
-  
+
   previewMesh: THREE.Mesh | null = null;
   previewTime = 0;
   hoverPosition: { x: number; y: number; z: number } | null = null;
-  
+
   tileTextures: Map<string, THREE.CanvasTexture> = new Map();
   tileMeshes: Map<string, THREE.Mesh> = new Map();
 
@@ -31,8 +33,12 @@ export class Game {
     action: 'place' | 'delete';
     tile: PlacedTile;
     meshKey: string;
+  } | {
+    action: 'reveal';
+    previousTiles: PlacedTile[];
+    previousRemaining: Map<string, number>;
   }> = [];
-  
+
   raycaster = new THREE.Raycaster();
   mouse = new THREE.Vector2();
 
@@ -42,6 +48,12 @@ export class Game {
 
   // Win state tracking
   openConnectorMarkers: THREE.Mesh[] = [];
+
+  // Puzzle mode
+  puzzleMode = false;
+  currentPuzzle: Puzzle | null = null;
+  currentSolution: Solution | null = null;
+  puzzleTilesRemaining: Map<string, number> = new Map();  // tileId -> count remaining
   
   constructor(container: HTMLElement) {
     this.scene = new THREE.Scene();
@@ -254,6 +266,12 @@ export class Game {
 
     if (!this.grid.canPlaceTile(x, y, z, this.currentOrientation)) return;
 
+    // In puzzle mode, check if we have tiles remaining
+    if (this.puzzleMode && !this.canPlacePuzzleTile(this.selectedTileType.id)) {
+      console.log('No more of this tile available!');
+      return;
+    }
+
     const placedTile: PlacedTile = {
       definition: this.selectedTileType,
       position: { x, y, z },
@@ -270,6 +288,10 @@ export class Game {
         tile: placedTile,
         meshKey
       });
+
+      // Track puzzle tile usage
+      this.onPuzzleTilePlaced(this.selectedTileType.id);
+
       this.checkWinState();
     }
   }
@@ -394,6 +416,15 @@ export class Game {
       case 'p':
         this.debugBoardState();
         break;
+      case 'g':
+        this.testPuzzleGeneration();
+        break;
+      case 'm':
+        this.togglePuzzleMode();
+        break;
+      case 'h':
+        this.revealSolution();
+        break;
     }
   }
 
@@ -412,10 +443,25 @@ export class Game {
       // Undo a placement - remove the tile
       this.removeTileFromGrid(lastAction.tile);
       this.removeTileMesh(lastAction.meshKey);
+      // Restore puzzle tile
+      this.onPuzzleTileRemoved(lastAction.tile.definition.id);
     } else if (lastAction.action === 'delete') {
       // Undo a deletion - restore the tile
       this.grid.placeTile(lastAction.tile);
       this.createTileMesh(lastAction.tile);
+      // Use puzzle tile
+      this.onPuzzleTilePlaced(lastAction.tile.definition.id);
+    } else if (lastAction.action === 'reveal') {
+      // Undo reveal - restore previous state
+      this.clearBoardKeepFixed();
+      // Restore previous tiles
+      for (const tile of lastAction.previousTiles) {
+        this.grid.placeTile(tile);
+        this.createTileMesh(tile);
+      }
+      // Restore remaining counts
+      this.puzzleTilesRemaining = new Map(lastAction.previousRemaining);
+      this.updatePuzzlePalette();
     }
     this.updatePreview();
     this.checkWinState();
@@ -431,6 +477,17 @@ export class Game {
     const tile = this.getTileByKey(x, y, z, this.currentOrientation);
 
     if (tile) {
+      // In puzzle mode, don't allow deleting fixed tiles
+      if (this.puzzleMode && this.currentPuzzle) {
+        const isFixed = this.currentPuzzle.fixedPlacements.some(
+          p => p.cell.x === x && p.cell.y === y && p.cell.z === z && p.orientation === this.currentOrientation
+        );
+        if (isFixed) {
+          console.log('Cannot delete fixed hint tile!');
+          return;
+        }
+      }
+
       // Remove from grid
       this.removeTileFromGrid(tile);
       // Remove mesh
@@ -441,6 +498,8 @@ export class Game {
         tile: tile,
         meshKey: key
       });
+      // Restore puzzle tile
+      this.onPuzzleTileRemoved(tile.definition.id);
       this.updatePreview();
       this.checkWinState();
     }
@@ -585,7 +644,8 @@ export class Game {
       output.push(`  Orientation: ${tile.orientation}`);
       output.push(`  Rotation: ${tile.rotation}°`);
       output.push(`  Flipped: ${tile.flipped}`);
-      output.push(`  Config: T=${tile.definition.config?.top || 'null'} R=${tile.definition.config?.right || 'null'} B=${tile.definition.config?.bottom || 'null'} L=${tile.definition.config?.left || 'null'}`);
+      const tileConfig = GENERATED_TILES.find(t => t.id === tile.definition.id)?.config;
+      output.push(`  Config: T=${tileConfig?.top || 'null'} R=${tileConfig?.right || 'null'} B=${tileConfig?.bottom || 'null'} L=${tileConfig?.left || 'null'}`);
 
       // Get connectors for this tile
       const connectors = getTileConnectors(tile);
@@ -620,6 +680,375 @@ export class Game {
     }).catch(err => {
       console.error('Failed to copy to clipboard:', err);
     });
+  }
+
+  private testPuzzleGeneration() {
+    console.log('=== PUZZLE GENERATION ===');
+
+    const result = generatePuzzleWithSolution({
+      size: { min: 3, max: 6 },
+      mode: 'arrange',
+      allow3D: false
+    });
+
+    if (!result) {
+      console.log('Failed to generate puzzle');
+      return;
+    }
+
+    const { puzzle, solution } = result;
+    console.log('Generated puzzle:');
+    console.log(`  Mode: ${puzzle.mode}`);
+    console.log(`  Tiles: ${puzzle.tiles.map((t: { tileId: string; count: number }) => `${t.count}x ${t.tileId}`).join(', ')}`);
+    console.log(`  Fixed placements: ${puzzle.fixedPlacements.length}`);
+    console.log(`  Solution placements: ${solution.placements.length}`);
+    const bounds = puzzle.gridBounds;
+    console.log(`  Grid: (${bounds.min.x},${bounds.min.y},${bounds.min.z}) to (${bounds.max.x},${bounds.max.y},${bounds.max.z})`);
+  }
+
+  private togglePuzzleMode() {
+    if (this.puzzleMode) {
+      this.exitPuzzleMode();
+    } else {
+      this.enterPuzzleMode();
+    }
+  }
+
+  setPuzzleSize(min: number, max: number) {
+    this.puzzleSize = { min, max };
+    console.log(`Puzzle size set to ${min}-${max} tiles`);
+  }
+
+  setAllow3D(allow: boolean) {
+    this.allow3D = allow;
+    console.log(`3D puzzles ${allow ? 'enabled' : 'disabled'}`);
+  }
+
+  startPuzzle() {
+    if (this.puzzleMode) {
+      this.exitPuzzleMode();
+    }
+    this.enterPuzzleMode();
+  }
+
+  puzzleSize: { min: number; max: number } = { min: 4, max: 7 };
+  allow3D = false;
+
+  private enterPuzzleMode() {
+    // Generate a puzzle with solution
+    const result = generatePuzzleWithSolution({
+      size: this.puzzleSize,
+      mode: 'arrange',
+      allow3D: this.allow3D
+    });
+
+    if (!result) {
+      console.log('Failed to generate puzzle');
+      return;
+    }
+
+    const { puzzle, solution } = result;
+
+    this.puzzleMode = true;
+    this.currentPuzzle = puzzle;
+    this.currentSolution = solution;
+
+    // Clear the board
+    this.clearBoard();
+
+    // Initialize remaining tiles
+    this.puzzleTilesRemaining.clear();
+    for (const spec of puzzle.tiles) {
+      this.puzzleTilesRemaining.set(spec.tileId, spec.count);
+    }
+
+    // Place fixed tiles (hint) and subtract from remaining
+    for (const placement of puzzle.fixedPlacements) {
+      const tile = GENERATED_TILES.find(t => t.id === placement.tileId);
+      if (tile) {
+        const placedTile: PlacedTile = {
+          definition: tile,
+          position: placement.cell,
+          rotation: placement.rotation,
+          flipped: placement.flipped,
+          orientation: placement.orientation
+        };
+        this.grid.placeTile(placedTile);
+        this.createTileMesh(placedTile);
+
+        // Subtract the fixed tile from remaining count
+        const remaining = this.puzzleTilesRemaining.get(placement.tileId) ?? 0;
+        this.puzzleTilesRemaining.set(placement.tileId, Math.max(0, remaining - 1));
+      }
+    }
+
+    // Update palette to show only puzzle tiles
+    this.updatePuzzlePalette();
+
+    // Update UI
+    this.checkWinState();
+    console.log('=== PUZZLE MODE STARTED ===');
+    console.log(`Place ${puzzle.tiles.reduce((sum, t) => sum + t.count, 0)} tiles to solve!`);
+  }
+
+  exitPuzzleMode() {
+    this.puzzleMode = false;
+    this.currentPuzzle = null;
+    this.currentSolution = null;
+    this.puzzleTilesRemaining.clear();
+
+    // Restore full palette
+    this.restoreFullPalette();
+
+    console.log('=== PUZZLE MODE ENDED ===');
+  }
+
+  private clearBoard() {
+    // Remove all tile meshes
+    for (const mesh of this.tileMeshes.values()) {
+      this.scene.remove(mesh);
+    }
+    this.tileMeshes.clear();
+
+    // Clear grid
+    this.grid.flatTiles.clear();
+    this.grid.edgeTilesX.clear();
+    this.grid.edgeTilesZ.clear();
+
+    // Clear undo stack
+    this.undoStack = [];
+
+    // Clear markers
+    for (const marker of this.openConnectorMarkers) {
+      this.scene.remove(marker);
+    }
+    this.openConnectorMarkers = [];
+  }
+
+  private clearBoardKeepFixed() {
+    // Remove all tile meshes except fixed placements
+    const fixedKeys = new Set<string>();
+    if (this.currentPuzzle) {
+      for (const p of this.currentPuzzle.fixedPlacements) {
+        fixedKeys.add(`${p.cell.x},${p.cell.y},${p.cell.z},${p.orientation}`);
+      }
+    }
+
+    // Remove non-fixed meshes
+    for (const [key, mesh] of this.tileMeshes.entries()) {
+      if (!fixedKeys.has(key)) {
+        this.scene.remove(mesh);
+        this.tileMeshes.delete(key);
+      }
+    }
+
+    // Clear grid tiles except fixed
+    for (const [key] of this.grid.flatTiles) {
+      if (!fixedKeys.has(key + ',flat')) {
+        this.grid.flatTiles.delete(key);
+      }
+    }
+    for (const [key] of this.grid.edgeTilesX) {
+      if (!fixedKeys.has(key + ',vertical-x')) {
+        this.grid.edgeTilesX.delete(key);
+      }
+    }
+    for (const [key] of this.grid.edgeTilesZ) {
+      if (!fixedKeys.has(key + ',vertical-z')) {
+        this.grid.edgeTilesZ.delete(key);
+      }
+    }
+
+    // Clear markers
+    for (const marker of this.openConnectorMarkers) {
+      this.scene.remove(marker);
+    }
+    this.openConnectorMarkers = [];
+  }
+
+  revealSolution() {
+    if (!this.puzzleMode || !this.currentSolution || !this.currentPuzzle) {
+      console.log('No puzzle to reveal!');
+      return;
+    }
+
+    // Save current state for undo
+    const previousTiles: PlacedTile[] = [];
+    const fixedKeys = new Set<string>();
+    for (const p of this.currentPuzzle.fixedPlacements) {
+      fixedKeys.add(`${p.cell.x},${p.cell.y},${p.cell.z},${p.orientation}`);
+    }
+
+    // Collect all non-fixed placed tiles
+    for (const [key, tile] of this.grid.flatTiles) {
+      if (!fixedKeys.has(key + ',flat')) {
+        previousTiles.push(tile);
+      }
+    }
+    for (const [key, tile] of this.grid.edgeTilesX) {
+      if (!fixedKeys.has(key + ',vertical-x')) {
+        previousTiles.push(tile);
+      }
+    }
+    for (const [key, tile] of this.grid.edgeTilesZ) {
+      if (!fixedKeys.has(key + ',vertical-z')) {
+        previousTiles.push(tile);
+      }
+    }
+
+    // Push reveal action to undo stack
+    this.undoStack.push({
+      action: 'reveal',
+      previousTiles,
+      previousRemaining: new Map(this.puzzleTilesRemaining)
+    });
+
+    // Clear board except fixed tiles
+    this.clearBoardKeepFixed();
+
+    // Place all tiles from solution
+    for (const placement of this.currentSolution.placements) {
+      // Skip fixed placements (already on board)
+      const key = `${placement.cell.x},${placement.cell.y},${placement.cell.z},${placement.orientation}`;
+      if (fixedKeys.has(key)) continue;
+
+      const tile = GENERATED_TILES.find(t => t.id === placement.tileId);
+      if (tile) {
+        const placedTile: PlacedTile = {
+          definition: tile,
+          position: placement.cell,
+          rotation: placement.rotation,
+          flipped: placement.flipped,
+          orientation: placement.orientation
+        };
+        this.grid.placeTile(placedTile);
+        this.createTileMesh(placedTile);
+      }
+    }
+
+    // Set remaining to 0 for all tiles
+    for (const spec of this.currentPuzzle.tiles) {
+      this.puzzleTilesRemaining.set(spec.tileId, 0);
+    }
+    this.updatePuzzlePalette();
+
+    this.checkWinState();
+    console.log('Solution revealed! Press Z to undo.');
+  }
+
+  private updatePuzzlePalette() {
+    const palette = document.getElementById('tile-palette');
+    if (!palette || !this.currentPuzzle) return;
+
+    // Hide all tiles first
+    palette.querySelectorAll('.tile-option').forEach(el => {
+      (el as HTMLElement).style.display = 'none';
+      el.classList.remove('puzzle-tile');
+    });
+
+    // Show and update tiles in the puzzle
+    for (const spec of this.currentPuzzle.tiles) {
+      const el = palette.querySelector(`[data-tile-id="${spec.tileId}"]`) as HTMLElement;
+      if (el) {
+        el.style.display = 'block';
+        el.classList.add('puzzle-tile');
+        // Add count badge
+        let badge = el.querySelector('.tile-count') as HTMLElement;
+        if (!badge) {
+          badge = document.createElement('span');
+          badge.className = 'tile-count';
+          el.appendChild(badge);
+        }
+        const remaining = this.puzzleTilesRemaining.get(spec.tileId) ?? 0;
+        badge.textContent = remaining.toString();
+        badge.style.display = remaining > 0 ? 'block' : 'none';
+      }
+    }
+
+    // Select first available tile
+    const firstAvailable = this.currentPuzzle.tiles.find(
+      spec => (this.puzzleTilesRemaining.get(spec.tileId) ?? 0) > 0
+    );
+    if (firstAvailable) {
+      this.selectTile(firstAvailable.tileId);
+    }
+  }
+
+  private restoreFullPalette() {
+    const palette = document.getElementById('tile-palette');
+    if (!palette) return;
+
+    // Show all tiles
+    palette.querySelectorAll('.tile-option').forEach(el => {
+      (el as HTMLElement).style.display = 'block';
+      el.classList.remove('puzzle-tile');
+      // Remove count badges
+      const badge = el.querySelector('.tile-count');
+      if (badge) badge.remove();
+    });
+
+    // Select first tile
+    if (GENERATED_TILES.length > 0) {
+      this.selectTile(GENERATED_TILES[0].id);
+    }
+  }
+
+  // Override to check puzzle tile availability
+  canPlacePuzzleTile(tileId: string): boolean {
+    if (!this.puzzleMode) return true;
+    const remaining = this.puzzleTilesRemaining.get(tileId) ?? 0;
+    return remaining > 0;
+  }
+
+  // Called after placing a tile in puzzle mode
+  onPuzzleTilePlaced(tileId: string) {
+    if (!this.puzzleMode) return;
+
+    const remaining = (this.puzzleTilesRemaining.get(tileId) ?? 1) - 1;
+    this.puzzleTilesRemaining.set(tileId, remaining);
+
+    // Update palette badge
+    const el = document.querySelector(`[data-tile-id="${tileId}"] .tile-count`) as HTMLElement;
+    if (el) {
+      el.textContent = remaining.toString();
+      el.style.display = remaining > 0 ? 'block' : 'none';
+    }
+
+    // If no more of this tile, select next available
+    if (remaining <= 0) {
+      const nextAvailable = [...this.puzzleTilesRemaining.entries()].find(([_, count]) => count > 0);
+      if (nextAvailable) {
+        this.selectTile(nextAvailable[0]);
+      }
+    }
+
+    this.checkPuzzleComplete();
+  }
+
+  // Called after removing a tile in puzzle mode
+  onPuzzleTileRemoved(tileId: string) {
+    if (!this.puzzleMode) return;
+
+    const remaining = (this.puzzleTilesRemaining.get(tileId) ?? 0) + 1;
+    this.puzzleTilesRemaining.set(tileId, remaining);
+
+    // Update palette badge
+    const el = document.querySelector(`[data-tile-id="${tileId}"] .tile-count`) as HTMLElement;
+    if (el) {
+      el.textContent = remaining.toString();
+      el.style.display = 'block';
+    }
+  }
+
+  private checkPuzzleComplete() {
+    if (!this.puzzleMode) return;
+
+    // Check if all tiles placed
+    const allPlaced = [...this.puzzleTilesRemaining.values()].every(count => count === 0);
+    if (!allPlaced) return;
+
+    // Check if connections are valid
+    this.checkWinState();
   }
 
   private updateCamera() {

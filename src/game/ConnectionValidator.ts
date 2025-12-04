@@ -22,20 +22,6 @@ function getTileConfig(tile: PlacedTile): TileConfig | null {
   return genTile?.config || null;
 }
 
-// Rotate an edge based on tile rotation (0, 90, 180, 270)
-function rotateEdge(edge: 'top' | 'right' | 'bottom' | 'left', rotation: number): 'top' | 'right' | 'bottom' | 'left' {
-  const edges: Array<'top' | 'right' | 'bottom' | 'left'> = ['top', 'right', 'bottom', 'left'];
-  const idx = edges.indexOf(edge);
-  const rotSteps = Math.round(rotation / 90) % 4;
-  return edges[(idx + rotSteps) % 4];
-}
-
-// Flip connector position if tile is flipped
-function flipConnectorPos(pos: ConnectorPos, flipped: boolean): ConnectorPos {
-  if (!flipped || pos === 'middle' || pos === null) return pos;
-  return pos === 'left' ? 'right' : 'left';
-}
-
 // Get world position for a connector on a placed tile
 //
 // APPROACH:
