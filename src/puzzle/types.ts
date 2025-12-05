@@ -138,6 +138,10 @@ export interface GenerationConfig {
   tilePool?: string[];  // Restrict to specific tile IDs
   requireUniqueSolution?: boolean;
   minInterestingness?: number;
+  // Network complexity options
+  allowEndCaps?: boolean;   // If false, only generate closed loops (default: true)
+  allow3Way?: boolean;      // Allow 3-way junction tiles (default: false)
+  allow4Way?: boolean;      // Allow 4-way junction tiles (default: false)
 }
 
 // ============= Analysis Types =============
