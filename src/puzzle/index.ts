@@ -1,5 +1,4 @@
-// Puzzle System - Types and Precompute only
-// Generator and solver have been deleted - to be rebuilt
+// Puzzle System - Types, Precompute, and Solver
 
 // Re-export types
 export type {
@@ -26,3 +25,10 @@ export {
   getAllTileIds,
   getConnectorCount
 } from './precompute';
+
+// Solver API
+export {
+  solve,
+  enumeratePositions,
+  isValidSolution
+} from './solver';

@@ -1,6 +1,7 @@
 import './style.css';
 import { Game } from './game/Game';
 import { GENERATED_TILES, renderTileFromConfig } from './tiles/TileBuilder';
+import { solve, enumeratePositions } from './puzzle/solver';
 
 // Create main app container
 const app = document.querySelector<HTMLDivElement>('#app')!;
@@ -47,6 +48,9 @@ const game = new Game(app);
 
 // Expose globally for console access
 (window as unknown as { game: Game }).game = game;
+(window as unknown as { solve: typeof solve }).solve = solve;
+(window as unknown as { enumeratePositions: typeof enumeratePositions }).enumeratePositions = enumeratePositions;
+(window as unknown as { GENERATED_TILES: typeof GENERATED_TILES }).GENERATED_TILES = GENERATED_TILES;
 
 // Create tile palette
 const palette = document.getElementById('tile-palette')!;
