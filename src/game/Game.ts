@@ -275,6 +275,76 @@ export class Game {
     }
   }
 
+  // Public method to place tiles programmatically (for puzzle generation testing)
+  placeTileAt(
+    tileId: string,
+    x: number, y: number, z: number,
+    orientation: 'flat' | 'vertical-x' | 'vertical-z',
+    rotation: number,
+    flipped: boolean
+  ): boolean {
+    const tileDef = GENERATED_TILES.find(t => t.id === tileId);
+    if (!tileDef) return false;
+
+    if (!this.grid.canPlaceTile(x, y, z, orientation)) return false;
+
+    const placedTile: PlacedTile = {
+      definition: tileDef,
+      position: { x, y, z },
+      rotation: rotation as 0 | 90 | 180 | 270,
+      flipped,
+      orientation,
+    };
+
+    if (this.grid.placeTile(placedTile)) {
+      const meshKey = this.createTileMesh(placedTile);
+      this.undoStack.push({
+        action: 'place',
+        tile: placedTile,
+        meshKey
+      });
+      return true;
+    }
+    return false;
+  }
+
+  // Clear all tiles from the board
+  clearBoard(): void {
+    // Remove all tile meshes
+    for (const [, mesh] of this.tileMeshes) {
+      this.scene.remove(mesh);
+      mesh.geometry.dispose();
+      if (mesh.material instanceof THREE.Material) {
+        mesh.material.dispose();
+      }
+    }
+    this.tileMeshes.clear();
+    this.grid.clear();
+    this.undoStack = [];
+    this.checkWinState();
+  }
+
+  // Load a puzzle from generator output
+  loadPuzzle(placements: Array<{
+    cell: { x: number; y: number; z: number };
+    orientation: 'flat' | 'vertical-x' | 'vertical-z';
+    tileId: string;
+    rotation: number;
+    flipped: boolean;
+  }>): void {
+    this.clearBoard();
+    for (const p of placements) {
+      this.placeTileAt(
+        p.tileId,
+        p.cell.x, p.cell.y, p.cell.z,
+        p.orientation,
+        p.rotation,
+        p.flipped
+      );
+    }
+    console.log(`Loaded ${placements.length} tiles`);
+  }
+
   private createTileMesh(tile: PlacedTile): string {
     // If flipped, swap which texture goes on top vs bottom
     const topTexId = tile.flipped ? tile.definition.id + '_flipped' : tile.definition.id;
@@ -491,6 +561,19 @@ export class Game {
       this.updatePaletteSelection();
       this.updateInfoDisplay();
     }
+  }
+
+  // Get all placed tiles for debugging
+  getPlacedTiles() {
+    const tiles = this.grid.getAllTiles();
+    return tiles.map(t => ({
+      id: t.definition.id,
+      name: t.definition.name,
+      pos: t.position,
+      rotation: t.rotation,
+      flipped: t.flipped,
+      orientation: t.orientation
+    }));
   }
 
   private updatePaletteSelection() {

@@ -2,6 +2,7 @@ import './style.css';
 import { Game } from './game/Game';
 import { GENERATED_TILES, renderTileFromConfig } from './tiles/TileBuilder';
 import { solve, enumeratePositions } from './puzzle/solver';
+import { randomInventory, boundsForInventory, generatePuzzle, generatePuzzles, generateShape, generateShapePuzzle, findFittingTiles, buildNetwork, buildPuzzle, fillShape, buildCubePuzzle, buildGridPuzzle, buildBox, buildLargeBox, testTwoTiles } from './puzzle/generator';
 
 // Create main app container
 const app = document.querySelector<HTMLDivElement>('#app')!;
@@ -51,6 +52,22 @@ const game = new Game(app);
 (window as unknown as { solve: typeof solve }).solve = solve;
 (window as unknown as { enumeratePositions: typeof enumeratePositions }).enumeratePositions = enumeratePositions;
 (window as unknown as { GENERATED_TILES: typeof GENERATED_TILES }).GENERATED_TILES = GENERATED_TILES;
+// Generator functions
+(window as unknown as { randomInventory: typeof randomInventory }).randomInventory = randomInventory;
+(window as unknown as { boundsForInventory: typeof boundsForInventory }).boundsForInventory = boundsForInventory;
+(window as unknown as { generatePuzzle: typeof generatePuzzle }).generatePuzzle = generatePuzzle;
+(window as unknown as { generatePuzzles: typeof generatePuzzles }).generatePuzzles = generatePuzzles;
+(window as unknown as { generateShape: typeof generateShape }).generateShape = generateShape;
+(window as unknown as { generateShapePuzzle: typeof generateShapePuzzle }).generateShapePuzzle = generateShapePuzzle;
+(window as unknown as { findFittingTiles: typeof findFittingTiles }).findFittingTiles = findFittingTiles;
+(window as unknown as { buildNetwork: typeof buildNetwork }).buildNetwork = buildNetwork;
+(window as unknown as { buildPuzzle: typeof buildPuzzle }).buildPuzzle = buildPuzzle;
+(window as unknown as { fillShape: typeof fillShape }).fillShape = fillShape;
+(window as unknown as { buildCubePuzzle: typeof buildCubePuzzle }).buildCubePuzzle = buildCubePuzzle;
+(window as unknown as { buildGridPuzzle: typeof buildGridPuzzle }).buildGridPuzzle = buildGridPuzzle;
+(window as unknown as { buildBox: typeof buildBox }).buildBox = buildBox;
+(window as unknown as { buildLargeBox: typeof buildLargeBox }).buildLargeBox = buildLargeBox;
+(window as unknown as { testTwoTiles: typeof testTwoTiles }).testTwoTiles = testTwoTiles;
 
 // Create tile palette
 const palette = document.getElementById('tile-palette')!;

@@ -196,11 +196,23 @@ export class Grid {
   // Get all placed tiles
   getAllTiles(): PlacedTile[] {
     const tiles: PlacedTile[] = [];
-    for (const cell of this.cells.values()) {
-      if (cell.tile) {
-        tiles.push(cell.tile);
-      }
+    for (const tile of this.flatTiles.values()) {
+      tiles.push(tile);
+    }
+    for (const tile of this.edgeTilesX.values()) {
+      tiles.push(tile);
+    }
+    for (const tile of this.edgeTilesZ.values()) {
+      tiles.push(tile);
     }
     return tiles;
+  }
+
+  // Clear all tiles from the grid
+  clear(): void {
+    this.flatTiles.clear();
+    this.edgeTilesX.clear();
+    this.edgeTilesZ.clear();
+    this.cells.clear();
   }
 }
