@@ -16,6 +16,7 @@ export class SlidingUI {
   private placementRotation: number = 0;
   private placementFlipped: boolean = false;
   private undoStack: SlidingPuzzleState[] = [];
+  private shuffleMoves: number = 15;
 
   constructor(container: HTMLElement) {
     this.container = container;
@@ -163,6 +164,7 @@ export class SlidingUI {
     if (this.state.mode === 'edit') {
       buttons.innerHTML = `
         <button id="clear-btn">Clear</button>
+        <label>Moves: <input type="number" id="shuffle-moves" value="${this.shuffleMoves}" min="1" max="100" style="width:50px"></label>
         <button id="shuffle-btn" class="primary">Shuffle & Play</button>
       `;
     } else {
@@ -206,6 +208,10 @@ export class SlidingUI {
         this.render();
       });
 
+      document.getElementById('shuffle-moves')?.addEventListener('change', (e) => {
+        this.shuffleMoves = parseInt((e.target as HTMLInputElement).value) || 15;
+      });
+
       document.getElementById('shuffle-btn')?.addEventListener('click', () => {
         // Count non-empty tiles
         let tileCount = 0;
@@ -218,9 +224,12 @@ export class SlidingUI {
           alert('Place at least 2 tiles before shuffling!');
           return;
         }
-        // Shuffle with moves proportional to grid size
-        const moves = this.state.rows * this.state.cols * 5;
-        this.state = shufflePuzzle(this.state, moves);
+        // Read shuffle moves from input
+        const movesInput = document.getElementById('shuffle-moves') as HTMLInputElement;
+        if (movesInput) {
+          this.shuffleMoves = parseInt(movesInput.value) || 15;
+        }
+        this.state = shufflePuzzle(this.state, this.shuffleMoves);
         this.undoStack = [];
         this.render();
       });
@@ -248,9 +257,8 @@ export class SlidingUI {
               }
             }
           }
-          // Re-shuffle
-          const moves = this.state.rows * this.state.cols * 5;
-          this.state = shufflePuzzle(this.state, moves);
+          // Re-shuffle with same move count
+          this.state = shufflePuzzle(this.state, this.shuffleMoves);
           this.undoStack = [];
           this.render();
         }

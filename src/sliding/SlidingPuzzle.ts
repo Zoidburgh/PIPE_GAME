@@ -165,11 +165,12 @@ export function getValidSlides(state: SlidingPuzzleState): { row: number; col: n
 }
 
 // Slide a tile into the empty space (returns new state)
-// Every slide rotates the tile 90° clockwise
+// Every slide rotates the tile 90° clockwise (or counter-clockwise if reverse=true)
 export function slideTile(
   state: SlidingPuzzleState,
   fromRow: number,
-  fromCol: number
+  fromCol: number,
+  reverse: boolean = false
 ): SlidingPuzzleState | null {
   const { emptyPos, grid } = state;
 
@@ -184,10 +185,20 @@ export function slideTile(
   // Create new grid
   const newGrid = grid.map(row => [...row]);
 
-  // Move tile to empty space, rotate 90° clockwise
+  // Move tile to empty space, rotate 90° visually clockwise (or CCW if reverse)
+  // Flipped tiles need opposite internal rotation to appear the same visually
+  // Normal: flipped=-90, non-flipped=+90
+  // Reverse: flipped=+90, non-flipped=-90
+  let rotationDelta: number;
+  if (reverse) {
+    rotationDelta = tile.flipped ? 90 : -90;
+  } else {
+    rotationDelta = tile.flipped ? -90 : 90;
+  }
+
   newGrid[emptyPos.row][emptyPos.col] = {
     tileId: tile.tileId,
-    rotation: (tile.rotation + 90) % 360,
+    rotation: (tile.rotation + rotationDelta + 360) % 360,
     flipped: tile.flipped
   };
   newGrid[fromRow][fromCol] = null;
@@ -221,7 +232,9 @@ export function shufflePuzzle(state: SlidingPuzzleState, moves: number): Sliding
     // Remember the empty position before slide (this is where the tile will go)
     lastMove = { row: current.emptyPos.row, col: current.emptyPos.col };
 
-    const newState = slideTile(current, chosen.row, chosen.col);
+    // Use reverse=true so rotations are counter-clockwise
+    // When player reverses these moves with clockwise rotations, they cancel out
+    const newState = slideTile(current, chosen.row, chosen.col, true);
     if (newState) {
       current = newState;
       actualMoves++;
@@ -229,7 +242,7 @@ export function shufflePuzzle(state: SlidingPuzzleState, moves: number): Sliding
   }
 
   current.moveCount = 0;
-  current.optimalMoves = actualMoves; // solving in reverse takes same number of moves
+  current.optimalMoves = actualMoves;
   current.mode = 'play';
   return current;
 }
